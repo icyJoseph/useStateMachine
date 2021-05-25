@@ -1,8 +1,8 @@
 import * as React from 'react';
 import * as ReactDOM from 'react-dom';
 import useStateMachine from '@cassiozen/usestatemachine';
-import { useSubscription } from 'use-subscription';
 import { readingTime } from 'reading-time-estimator';
+import { useTextStream } from './useTextStream';
 
 import './index.css';
 
@@ -14,75 +14,10 @@ type ReadingContext = {
   data?: ReturnType<typeof readingTime>;
 };
 
-type ContextUpdate<Context> = (context: Context) => Context;
-
-type UpdateFn = React.Dispatch<ContextUpdate<ReadingContext | undefined>>;
-
-type States = 'idle' | 'writing';
-type Transitions = 'IDLE' | 'INPUT';
-
-const useConstant = <Value,>(init: () => Value) => {
-  const ref = React.useRef<Value | null>(null);
-
-  if (ref.current === null) {
-    ref.current = init();
-  }
-  return ref.current;
-};
-
-const useTextStream = <Context, Value = string>(
-  element: HTMLTextAreaElement | null,
-  callback: (ctx: Context, value: Value) => Context
-) => {
-  const sendRef = React.useRef<React.Dispatch<Transitions> | null>(null);
-  const [idle, setIdle] = React.useState(false);
-
-  const subscription = React.useMemo(
-    () => ({
-      getCurrentValue: () => element?.value,
-      subscribe: (callback: () => void) => {
-        element?.addEventListener('input', callback);
-        return () => element?.removeEventListener('input', callback);
-      },
-    }),
-    [element]
-  );
-
-  const value = useSubscription(subscription);
-
-  React.useEffect(() => {
-    setIdle(false);
-    const timer = setTimeout(() => setIdle(true), 1000);
-    return () => clearTimeout(timer);
-  }, [value]);
-
-  React.useEffect(() => {
-    sendRef.current?.(idle ? 'IDLE' : 'INPUT');
-  }, [idle]);
-
-  const read = (update: UpdateFn) => update?.((ctx: Context) => callback(ctx, value));
-
-  const onChange = <S extends React.Dispatch<Transitions>>(send: S) => {
-    sendRef.current = send;
-  };
-
-  return { read, onChange };
-};
-
 function App() {
-  const ref = React.useRef<HTMLTextAreaElement>(null);
-  const [source, setSource] = React.useState<HTMLTextAreaElement | null>(null);
+  const [read, onChange, ref] = useTextStream();
 
-  React.useEffect(() => {
-    if (ref.current) {
-      const element = ref.current;
-      setSource(element);
-    }
-  }, []);
-
-  const subscription = useTextStream<ReadingContext>(source, (_, text) => ({ data: readingTime(text, 100) }));
-
-  const [machine, send] = useStateMachine<ReadingContext>()<States, Transitions>({
+  const [machine, send] = useStateMachine<ReadingContext>()({
     initial: 'idle',
     verbose: true,
     states: {
@@ -96,13 +31,14 @@ function App() {
           INPUT: 'writing',
         },
         effect(_, update) {
-          subscription.read(update);
+          read(text => update(() => ({ data: readingTime(text, 100) })));
         },
       },
     },
   });
 
-  useConstant(() => subscription.onChange(send));
+  // both send and onChange on this case are stable
+  React.useEffect(() => onChange(idle => send(idle ? 'IDLE' : 'INPUT')), [send, onChange]);
 
   return (
     <React.Fragment>
