@@ -4,6 +4,11 @@ import { useSubscription } from 'use-subscription';
 /*
  * For this example, consider this to be an API you can't modify.
  * You can only consume it.
+ *
+ * If you have a type of stream, or subscription, you could try to
+ * shape it in this form, and expose an read and onChange (or which ever event)
+ * and return those to use them from within the state machine.
+ *
  */
 
 type VoidCb = () => void;
