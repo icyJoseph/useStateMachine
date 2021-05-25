@@ -15,10 +15,26 @@ type ReadingContext = {
 };
 
 type ContextUpdate<Context> = (context: Context) => Context;
+
 type UpdateFn = React.Dispatch<ContextUpdate<ReadingContext | undefined>>;
 
-const useTextStream = <T, V = string>(element: HTMLTextAreaElement | null, callback: (ctx: T, value: V) => T) => {
-  const sendRef = React.useRef<React.Dispatch<'IDLE' | 'INPUT'> | null>(null);
+type States = 'idle' | 'writing';
+type Transitions = 'IDLE' | 'INPUT';
+
+const useConstant = <Value,>(init: () => Value) => {
+  const ref = React.useRef<Value | null>(null);
+
+  if (ref.current === null) {
+    ref.current = init();
+  }
+  return ref.current;
+};
+
+const useTextStream = <Context, Value = string>(
+  element: HTMLTextAreaElement | null,
+  callback: (ctx: Context, value: Value) => Context
+) => {
+  const sendRef = React.useRef<React.Dispatch<Transitions> | null>(null);
   const [idle, setIdle] = React.useState(false);
 
   const subscription = React.useMemo(
@@ -44,11 +60,13 @@ const useTextStream = <T, V = string>(element: HTMLTextAreaElement | null, callb
     sendRef.current?.(idle ? 'IDLE' : 'INPUT');
   }, [idle]);
 
-  return (send: React.Dispatch<'IDLE' | 'INPUT'>, update?: UpdateFn) => {
+  const read = (update: UpdateFn) => update?.((ctx: Context) => callback(ctx, value));
+
+  const onChange = <S extends React.Dispatch<Transitions>>(send: S) => {
     sendRef.current = send;
-    console.count('sub');
-    update?.((ctx: T) => callback(ctx, value));
   };
+
+  return { read, onChange };
 };
 
 function App() {
@@ -62,9 +80,9 @@ function App() {
     }
   }, []);
 
-  const subscription = useTextStream<ReadingContext>(source, (_, text) => ({ data: readingTime(text) }));
+  const subscription = useTextStream<ReadingContext>(source, (_, text) => ({ data: readingTime(text, 100) }));
 
-  const [machine] = useStateMachine<ReadingContext>()({
+  const [machine, send] = useStateMachine<ReadingContext>()<States, Transitions>({
     initial: 'idle',
     verbose: true,
     states: {
@@ -72,20 +90,19 @@ function App() {
         on: {
           IDLE: 'idle',
         },
-        effect(send) {
-          subscription(send);
-        },
       },
       idle: {
         on: {
           INPUT: 'writing',
         },
-        effect(send, update) {
-          subscription(send, update);
+        effect(_, update) {
+          subscription.read(update);
         },
       },
     },
   });
+
+  useConstant(() => subscription.onChange(send));
 
   return (
     <React.Fragment>
